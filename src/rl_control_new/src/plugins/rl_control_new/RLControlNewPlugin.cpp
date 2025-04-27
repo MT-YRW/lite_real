@@ -97,6 +97,10 @@ private:
     qdot_d = Eigen::VectorXd::Zero(motor_num);
     tor_d = Eigen::VectorXd::Zero(motor_num);
 
+    /// MT add
+    q_a_last = Eigen::VectorXd::Zero(motor_num);
+    qdot_a_last = Eigen::VectorXd::Zero(motor_num);
+    ///
     Q_a_last = Eigen::VectorXd::Zero(motor_num);
     Qdot_a_last = Eigen::VectorXd::Zero(motor_num);
     Tor_a_last = Eigen::VectorXd::Zero(motor_num);
@@ -229,6 +233,8 @@ private:
     // RobotInterface *robot_interface = get_robot_interface();
     // robot_interface->Init();
 
+    /// FSM
+    enum State { DISABLED, STAND, WALKING };
     /// inference init
     st_interface<float> inference_data;
     c_interface<float> Robot_inference;
@@ -322,6 +328,10 @@ private:
       zero_cnt(i) = (q_a(i) < -pi) ? 1.0 : zero_cnt(i);
       q_a(i) += zero_cnt(i) * 2.0 * pi;
     }
+
+    q_a_last = q_a;
+    qdot_a_last = qdot_a;
+
     std::cout << "current Q_A pos: " << Q_a.transpose() << std::endl;
     std::cout << "current pos: " << q_a.transpose() << std::endl;
     std::cout << "enter 1: " << std::endl;
@@ -487,13 +497,37 @@ private:
         flag_.yaw_speed_command = fmin(fmax(yaw_speed_command, -0.2), 0.2);
       }
 
-      timer1 = timer.currentTime() - start_time;
+      // timer1 = timer.currentTime() - start_time;
 
       //--------------------------------------hahaha-----------------------------------------------//
       /// inference data prepare
-      // (10 control steps needs 1 inference step)
 
-      if (xbox_map.f == -1.0) {
+      if (flag_.is_disable) {
+        kp.setZero();
+        kd.setZero();
+        q_d.setZero();
+        qdot_d.setZero();
+        tor_d.setZero();
+      } else if (flag_.fsm_state_command == "gotoZero") {
+        for (size_t i = 0; i < motor_num; i++) {
+          q_d(i) =
+              static_cast<double>(inference_data.config.default_position[i]);
+          qdot_d(i) = 0.0;
+          // tor_d(i) = 0.0;
+        }
+        // Compute torque
+        for (int i = 0; i < motor_num; i++) { // 这里kp和kd需要重新调一下。
+          double position_error =
+              static_cast<double>(inference_data.config.default_position[i]) -
+              static_cast<double>(q_a[i]);   // position error
+          tor_d[i] = kp[i] * position_error; // P
+          tor_d[i] += -kd[i] * qdot_a[i];    // D
+        }
+      } else if (flag_.fsm_state_command == "gotoStop") {
+        q_d.setZero();
+        qdot_d.setZero();
+        tor_d.setZero();
+      } else if (flag_.fsm_state_command == "gotoMLP") {
 
         // joint data
         for (int i = 0; i < motor_num; i++) {
@@ -529,7 +563,7 @@ private:
         Robot_inference.run(inference_data);
 
         // Compute torque for non-wheel joints.
-        for (int i = 0; i < motor_num; i++) {
+        for (int i = 0; i < motor_num; i++) { // 这里kp和kd需要重新调一下。
           float position_error =
               inference_data.Outputdata.joint_target_position[i] -
               raw_data.joint_current_position[i]; // position error
@@ -541,37 +575,19 @@ private:
 
         // set motor data
         Robot_inference.set_msg(inference_data);
+
+        // Align the interface
+        for (size_t i = 0; i < motor_num; i++) {
+          q_d(i) = static_cast<double>(
+              inference_data.Outputdata.motor_target_position[i]);
+          qdot_d(i) = static_cast<double>(
+              inference_data.Outputdata.motor_target_velocity[i]);
+          tor_d(i) = static_cast<double>(
+              inference_data.Outputdata.motor_target_torque[i]);
+        }
       }
-
-      // rl fsm
-      // robot_fsm->RunFSM(flag_);
-
       timer2 = timer.currentTime() - start_time - timer1;
 
-      // // set command
-      // robot_interface->SetCommand(robot_data);
-
-      // timeFSM += dt;
-
-      // q_d << robot_data.q_d_.segment(6, 14), 0.0, robot_data.q_d_(6 + 14),
-      //     robot_data.q_d_.segment(6 + 15, 2), 0.0, robot_data.q_d_(6 + 17);
-      // qdot_d << robot_data.q_dot_d_.segment(6, 14), 0.0,
-      //     robot_data.q_dot_d_(6 + 14), robot_data.q_dot_d_.segment(6 + 15,
-      //     2), 0.0, robot_data.q_dot_d_(6 + 17);
-      // tor_d << robot_data.tau_d_.segment(6, 14), 0.0, robot_data.tau_d_(6 +
-      // 14),
-      //     robot_data.tau_d_.segment(6 + 15, 2), 0.0, robot_data.tau_d_(6 +
-      //     17);
-
-      // q_d = robot_data.q_d_.tail(motor_num);
-      // qdot_d = robot_data.q_dot_d_.tail(motor_num);
-      // tor_d = robot_data.tau_d_.tail(motor_num);
-
-      for (size_t i = 0; i < motor_num; i++) {
-        q_d(i) = inference_data.Outputdata.motor_target_position[i];
-        qdot_d(i) = inference_data.Outputdata.motor_target_velocity[i];
-        tor_d(i) = inference_data.Outputdata.motor_target_torque[i];
-      }
       for (int i = 0; i < motor_num; i++) {
         Q_d(i) =
             (q_d(i) - zero_offset(i) - zero_cnt(i) * 2.0 * pi) * motor_dir(i) +
@@ -579,27 +595,6 @@ private:
         Qdot_d(i) = qdot_d(i) * motor_dir(i);
         Tor_d(i) = tor_d(i) * motor_dir(i);
       }
-
-      // std::cout << (q_d.segment(2,4)).transpose() << std::endl;
-      //  std::cout << (q_d.segment(2,4)-q_a_p.head(4)).transpose() <<
-      //  std::endl; std::cout << (Q_d-Q_a).transpose() << std::endl;
-      //  //test plan
-      //  float T = 4.0;
-      //  float mag = 0.1;
-      //  float t_init = 1.0;
-
-      // for(int i=0; i<motor_num; i++){
-      //   Q_d(i) = init_pos(i) + motor_dir(i)*mag*0.5*(1.0 -
-      //   std::cos(2.0*pi/T*t_now)); Qdot_d(i) =
-      //   motor_dir(i)*mag*pi/T*std::sin(2.0*pi/T*t_now); Tor_d(i) = 0.0;
-      // }
-
-      // 这里重写fsm的时候再改
-      // if (robot_fsm->disable_joints_) {
-      //   kp.setZero();
-      //   kd.setZero();
-      //   Tor_d.setZero();
-      // }
 
       // Send Command motorctrl mode
       bodyctrl_msgs::CmdMotorCtrl msg;
@@ -620,10 +615,9 @@ private:
       pubSetMotorCmd.publish(msg);
       // rate.sleep();
 
-      // timer3 = timer.currentTime() - start_time - timer1 - timer2;
+      timer3 = timer.currentTime() - start_time - timer1 - timer2;
 
       // #ifdef DATALOG_MAIN
-
       //       data.head(300) = robot_data.data_log_;
       //       data(300) = (timer.currentTime() - start_time).m_nanoSeconds *
       //       1e-6; data(301) = timer1.m_nanoSeconds * 1e-6; data(302) =
@@ -633,14 +627,12 @@ private:
       //       data.segment(314, 9) = xsense_data.head(9);
       //       data(323) = robot_fsm->getCurrentState();
       //       data(324) = t_now;
-
       //       for (const auto &i : data) {
       //         oss << i << " ";
       //       }
       //       logger->info(oss.str());
       //       oss.str("");
       // #endif
-
       //       sleep2Time = start_time + period;
       //       sleep2Time_spec = sleep2Time.toTimeSpec();
       //       clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
@@ -686,6 +678,9 @@ private:
   Eigen::VectorXd q_a;
   Eigen::VectorXd qdot_a;
   Eigen::VectorXd tor_a;
+  Eigen::VectorXd q_a_last;
+  Eigen::VectorXd qdot_a_last;
+  Eigen::VectorXd tor_a_last;
   Eigen::VectorXd q_d;
   Eigen::VectorXd qdot_d;
   Eigen::VectorXd tor_d;

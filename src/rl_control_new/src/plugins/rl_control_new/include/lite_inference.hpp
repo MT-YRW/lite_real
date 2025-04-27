@@ -39,9 +39,10 @@ template <typename T> struct Config {
   float dt = 0.0025;
   size_t run_ctrl_cnt = 0;
   size_t start_delay_cnt = 1000;
-  std::array<T, 20> default_position = {
-      {0.165647, 0.0, 0, -0.529741, -0.301101, 0., 0, 0.165647, 0.0, 0,
-       -0.529741, -0.301101}}; // 重写，20个关节，索引按照手册来
+  std::array<T, 20> default_position = {{0.0, 0.0, -0.46, 1.01, -0.549, 0.0,
+                                         0.0, 0.0, -0.46, 1.01, -0.549, 0.0,
+                                         0.0, 0.0, 0.0,   0.0,  0.0,    0.0,
+                                         0.0, 0.0}}; // 重写，20个关节，索引按照手册来
   float_inference_net::NetConfigT net_config = {
       .input_config = {.obs_scales_ang_vel = 1.0,
                        .obs_scales_lin_vel = 2.0,
@@ -160,26 +161,26 @@ private:
   void AnkleSet() {
     // 并联踝，需要改参数
     this->left_params.l_bar1 = 0.06;
-    this->left_params.l_rod1 = 0.241639;
-    this->left_params.r_a1 = {-0.00775, 0.06565, 0.2405};
-    this->left_params.r_b1_0 = {-0.06775, 0.06565, 0.2405};
-    this->left_params.r_c1_0 = {-0.04432, 0.06565, 0.0};
+    this->left_params.l_rod1 = 0.14;
+    this->left_params.r_a1 = {0.0, 0.043, 0.141};
+    this->left_params.r_b1_0 = {-0.056, 0.043, 0.163};
+    this->left_params.r_c1_0 = {-0.056, 0.043, 0.023};
     this->left_params.l_bar2 = 0.06;
-    this->left_params.l_rod2 = 0.159473;
-    this->left_params.r_a2 = {-0.00736, -0.06565, 0.1578};
-    this->left_params.r_b2_0 = {-0.06736, -0.06565, 0.1578};
-    this->left_params.r_c2_0 = {-0.04432, -0.06565, 0.0};
+    this->left_params.l_rod2 = 0.215;
+    this->left_params.r_a2 = {0.0, -0.044, 0.215};
+    this->left_params.r_b2_0 = {-0.056, -0.044, 0.237};
+    this->left_params.r_c2_0 = {-0.056, -0.044, 0.022};
 
     this->right_params.l_bar1 = 0.06;
-    this->right_params.l_rod1 = 0.159473;
-    this->right_params.r_a1 = {-0.00736, 0.06565, 0.1578};
-    this->right_params.r_b1_0 = {-0.06736, 0.06565, 0.1578};
-    this->right_params.r_c1_0 = {-0.04432, 0.06565, 0.0};
+    this->right_params.l_rod1 = 0.215;
+    this->right_params.r_a1 = {0.0, -0.044, 0.215};
+    this->right_params.r_b1_0 = {-0.056, -0.044, 0.237};
+    this->right_params.r_c1_0 = {-0.056, -0.044, 0.022};
     this->right_params.l_bar2 = 0.06;
-    this->right_params.l_rod2 = 0.241639;
-    this->right_params.r_a2 = {-0.00775, -0.06565, 0.2405};
-    this->right_params.r_b2_0 = {-0.06775, -0.06565, 0.2405};
-    this->right_params.r_c2_0 = {-0.04432, -0.06565, 0.0};
+    this->right_params.l_rod2 = 0.14;
+    this->right_params.r_a2 = {0.0, 0.043, 0.141};
+    this->right_params.r_b2_0 = {-0.056, 0.043, 0.163};
+    this->right_params.r_c2_0 = {-0.056, 0.043, 0.023};
 
     this->left_ankle = ParallelAnkle<float>(this->left_params, 1e-6);
     this->right_ankle = ParallelAnkle<float>(this->right_params, 1e-6);

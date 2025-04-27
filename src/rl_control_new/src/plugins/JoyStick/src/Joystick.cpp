@@ -15,14 +15,14 @@ Joystick_humanoid::~Joystick_humanoid()
 void Joystick_humanoid::xbox_map_read(const sensor_msgs::Joy::ConstPtr &msg)
 {
   std::lock_guard<std::mutex> lock(data_mutex);
-  xbox_map_.a = msg->axes[8];
+  xbox_map_.a = msg->axes[8];  // 按下a键，原地站立（f = 0）；原地踏步（f = -1），这应该是开始推理
   xbox_map_.b = msg->axes[9];
-  xbox_map_.c = msg->axes[10];
-  xbox_map_.d = msg->axes[11];
+  xbox_map_.c = msg->axes[10];  // 急停，但关节不下电
+  xbox_map_.d = msg->axes[11]; // 复位
   xbox_map_.e = msg->axes[4];
-  xbox_map_.f = msg->axes[7];
+  xbox_map_.f = msg->axes[7];  // f = 0 (拨杆0位)；f = 1 (拨杆向上)；f = -1 (拨杆向下)  推测，具体需要上机测试
   xbox_map_.g = msg->axes[5];
-  xbox_map_.h = msg->axes[6];
+  xbox_map_.h = msg->axes[6];  // 控制跑步
   xbox_map_.x1 = msg->axes[3];
   xbox_map_.x2 = msg->axes[0];
   xbox_map_.y1 = msg->axes[2];
