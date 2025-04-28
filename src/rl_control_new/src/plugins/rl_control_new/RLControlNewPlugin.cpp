@@ -184,7 +184,7 @@ private:
 
     sleep(1);
     // std::thread([this]() { rlControl(); }).detach();
-    std::thread([this]() { sin_test(); }).detach();  // 单关节正弦测试
+    std::thread([this]() { sin_test(); }).detach(); // 单关节正弦测试
   }
 
   // 混合模式测试
@@ -662,7 +662,9 @@ private:
 
     long count = 0;
     double t_now = 0;
-    double dt = 0.0025;
+    double dt = 0.001;
+    double test_time = 0.0;
+    bool test_flag = true;
 
     max_priority = sched_get_priority_max(SCHED_RR); // 获取系统调度最高优先级
     sched.sched_priority = max_priority; // 设置当前线程的调度策略和优先级
@@ -673,9 +675,13 @@ private:
     usleep(1000);
     printf("set scheduler success\n");
 
-    // joystick init
+    // init
     Joystick_humanoid joystick_humanoid;
     joystick_humanoid.init();
+    st_interface<float> inference_data;
+    c_interface<float> Robot_inference;
+    Robot_inference.init(inference_data);
+    sovle_st<float> raw_data;
 
     // 从消息队列中读取初始电机状态，确认都小于1后，输入1准备复位
     while (!queueMotorState.empty()) {
@@ -731,11 +737,6 @@ private:
       xbox_map.y2 = msg->axes[1];
     }
 #endif
-
-    st_interface<float> inference_data;
-    c_interface<float> Robot_inference;
-    Robot_inference.init(inference_data);
-    sovle_st<float> raw_data;
 
     kp << 700.0, 500.0, 700.0, 700.0, 15.0, 15.0, 700.0, 500.0, 700.0, 700.0,
         15.0, 15.0, 20.0, 10.0, 10.0, 10.0, 20.0, 10.0, 10.0, 10.0;
@@ -798,6 +799,11 @@ private:
         flag_.yaw_speed_command = fmin(fmax(yaw_speed_command, -0.2), 0.2);
       }
 
+      if (flag_.fsm_state_command == "gotoMLP" && test_flag) {
+        test_time = count * dt;
+        test_flag = false;
+      }
+
       if (flag_.is_disable) {
         kp.setZero();
         kd.setZero();
@@ -831,22 +837,28 @@ private:
         const size_t test_idx = 0;   // size_t到底跟int有什么区别
         const float amplidute = 0.1; // 0.1 rad，6度左右
         const float frequency = 1.0;
-        float current_time = count * dt;  //? 这对吗？
+        float current_time = count * dt - test_time; //? 这对吗？
+        std::cout << "current_time: " << current_time << std::endl;
 
         static float initial_pos = raw_data.joint_current_position[test_idx];
         float target_pos =
             initial_pos + amplidute * std::sin(2 * M_PI / current_time);
 
         for (size_t i = 0; i < motor_num; i++) {
-          // 测试关节正弦运动，其他关节保持零位静止
-          if (i == test_idx) {
-            q_d(i) = static_cast<double>(target_pos);
-          } else {
-            q_d(i) =
-                static_cast<double>(inference_data.config.default_position[i]);
-            qdot_d(i) = 0.0;
-            tor_d(i) = 0.0; // 这里是前馈扭矩，不是目标扭矩。
-          }
+          // // 测试关节正弦运动，其他关节保持零位静止
+          // if (i == test_idx) {
+          //   q_d(i) = static_cast<double>(target_pos);
+          // } else {
+          //   q_d(i) =
+          //       static_cast<double>(inference_data.config.default_position[i]);
+          //   qdot_d(i) = 0.0;
+          //   tor_d(i) = 0.0; // 这里是前馈扭矩，不是目标扭矩。
+          // }
+          kp.setZero();
+          kd.setZero();
+          q_d.setZero();
+          qdot_d.setZero();
+          tor_d.setZero();
         }
       }
       timer2 = timer.currentTime() - start_time - timer1;
@@ -881,6 +893,7 @@ private:
       timer3 = timer.currentTime() - start_time - timer1 - timer2;
 
       count++;
+      sleep(1);
     }
   }
 
