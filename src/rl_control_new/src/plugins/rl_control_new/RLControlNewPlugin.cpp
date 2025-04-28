@@ -183,7 +183,8 @@ private:
         "/cmd_vel", 1000, &RLControlNewPlugin::OnCmdVelMsg, this);
 
     sleep(1);
-    std::thread([this]() { rlControl(); }).detach();
+    // std::thread([this]() { rlControl(); }).detach();
+    std::thread([this]() { sin_test(); }).detach();  // 单关节正弦测试
   }
 
   // 混合模式测试
@@ -402,7 +403,7 @@ private:
 #endif
 
       // calculate Command
-      t_now = count * dt;
+      // t_now = count * dt;
 
       for (int i = 0; i < motor_num; i++) {
         if (fabs(Q_a(i) - Q_a_last(i)) > pi) {
@@ -452,22 +453,22 @@ private:
       // robot_data.joint_kp_p_ = kp;
       // robot_data.joint_kd_p_ = kd;
 
-      Eigen::VectorXd q_a_18 = Eigen::VectorXd::Zero(18);
-      Eigen::VectorXd q_dot_a_18 = Eigen::VectorXd::Zero(18);
-      Eigen::VectorXd tor_a_18 = Eigen::VectorXd::Zero(18);
-      Eigen::VectorXd kp_18 = Eigen::VectorXd::Zero(18);
-      Eigen::VectorXd kd_18 = Eigen::VectorXd::Zero(18);
-      q_a_18 << q_a.head(14), q_a(15), q_a.segment(16, 2), q_a(19);
-      q_dot_a_18 << qdot_a.head(14), qdot_a(15), qdot_a.segment(16, 2),
-          qdot_a(19);
-      tor_a_18 << tor_a.head(14), tor_a(15), tor_a.segment(16, 2), tor_a(19);
-      kp_18 << kp.head(14), kp(15), kp.segment(16, 2), kp(19);
-      kd_18 << kd.head(14), kd(15), kd.segment(16, 2), kd(19);
-      robot_data.q_a_.tail(18) = q_a_18;
-      robot_data.q_dot_a_.tail(18) = q_dot_a_18;
-      robot_data.tau_a_.tail(18) = tor_a_18;
-      robot_data.joint_kp_p_ = kp_18;
-      robot_data.joint_kd_p_ = kd_18;
+      // Eigen::VectorXd q_a_18 = Eigen::VectorXd::Zero(18);
+      // Eigen::VectorXd q_dot_a_18 = Eigen::VectorXd::Zero(18);
+      // Eigen::VectorXd tor_a_18 = Eigen::VectorXd::Zero(18);
+      // Eigen::VectorXd kp_18 = Eigen::VectorXd::Zero(18);
+      // Eigen::VectorXd kd_18 = Eigen::VectorXd::Zero(18);
+      // q_a_18 << q_a.head(14), q_a(15), q_a.segment(16, 2), q_a(19);
+      // q_dot_a_18 << qdot_a.head(14), qdot_a(15), qdot_a.segment(16, 2),
+      //     qdot_a(19);
+      // tor_a_18 << tor_a.head(14), tor_a(15), tor_a.segment(16, 2), tor_a(19);
+      // kp_18 << kp.head(14), kp(15), kp.segment(16, 2), kp(19);
+      // kd_18 << kd.head(14), kd(15), kd.segment(16, 2), kd(19);
+      // robot_data.q_a_.tail(18) = q_a_18;
+      // robot_data.q_dot_a_.tail(18) = q_dot_a_18;
+      // robot_data.tau_a_.tail(18) = tor_a_18;
+      // robot_data.joint_kp_p_ = kp_18;
+      // robot_data.joint_kd_p_ = kd_18;
 
       // roll offset
       // xsense_data(2) -= 0.005;
@@ -562,7 +563,7 @@ private:
         // inference one erax
         Robot_inference.run(inference_data);
 
-        // Compute torque for non-wheel joints.
+        // // Compute torque for non-wheel joints.
         for (int i = 0; i < motor_num; i++) { // 这里kp和kd需要重新调一下。
           float position_error =
               inference_data.Outputdata.joint_target_position[i] -
@@ -582,8 +583,11 @@ private:
               inference_data.Outputdata.motor_target_position[i]);
           qdot_d(i) = static_cast<double>(
               inference_data.Outputdata.motor_target_velocity[i]);
-          tor_d(i) = static_cast<double>(
-              inference_data.Outputdata.motor_target_torque[i]);
+          //! 这里下发的不应该是计算得到的目标力矩，因为下发的是前馈力矩！
+          //? 先给个0.0吗？
+          // tor_d(i) = static_cast<double>(
+          //     inference_data.Outputdata.motor_target_torque[i]);
+          tor_d(i) = 0.0;
         }
       }
       timer2 = timer.currentTime() - start_time - timer1;
@@ -641,6 +645,242 @@ private:
       // #ifdef DATALOG_MAIN
       //     logger->flush();
       // #endif
+    }
+  }
+
+  void sin_test() {
+    // set sched-strategy
+    struct sched_param sched;
+    int max_priority;
+    Time start_time;
+    Time period(0, 2500000);
+    Time sleep2Time;
+    Time timer;
+    timespec sleep2Time_spec;
+    double timeFSM = 0.0;
+    Time timer1, timer2, timer3, total_time;
+
+    long count = 0;
+    double t_now = 0;
+    double dt = 0.0025;
+
+    max_priority = sched_get_priority_max(SCHED_RR); // 获取系统调度最高优先级
+    sched.sched_priority = max_priority; // 设置当前线程的调度策略和优先级
+
+    if (sched_setscheduler(gettid(), SCHED_RR, &sched) == -1) {
+      printf("Set Scheduler Param, ERROR:%s\n", strerror(errno));
+    }
+    usleep(1000);
+    printf("set scheduler success\n");
+
+    // joystick init
+    Joystick_humanoid joystick_humanoid;
+    joystick_humanoid.init();
+
+    // 从消息队列中读取初始电机状态，确认都小于1后，输入1准备复位
+    while (!queueMotorState.empty()) {
+      auto msg = queueMotorState.pop();
+      // set motor buf
+      int id = 0;
+      for (auto &one : msg->status) {
+        id = motor_id[one.name];
+        Q_a(id) = one.pos;
+        Qdot_a(id) = one.speed;
+        Tor_a(id) = one.current * ct_scale(id);
+      }
+    }
+
+    init_pos = Q_a;
+    Q_a_last = Q_a;
+    Qdot_a_last = Qdot_a;
+    Tor_a_last = Tor_a;
+
+    for (int i = 0; i < motor_num; i++) {
+      q_a(i) = (Q_a(i) - zero_pos(i)) * motor_dir(i) +
+               zero_offset(
+                   i); // 将原始编码器值转换为统一坐标系下的关节角度（弧度制）
+      zero_cnt(i) = (q_a(i) > pi) ? -1.0 : zero_cnt(i);
+      zero_cnt(i) = (q_a(i) < -pi) ? 1.0 : zero_cnt(i);
+      q_a(i) += zero_cnt(i) * 2.0 * pi;
+    }
+
+    q_a_last = q_a;
+    qdot_a_last = qdot_a;
+
+    std::cout << "current Q_A pos: " << Q_a.transpose() << std::endl;
+    std::cout << "current pos: " << q_a.transpose() << std::endl;
+    std::cout << "enter 1: " << std::endl;
+    double a;
+    std::cin >> a;
+
+#ifdef USE_ROS_JOY
+    while (!queueJoyCmd.empty()) {
+      auto msg = queueJoyCmd.pop();
+      // set joy cmd buf
+      xbox_map.a = msg->axes[8];
+      xbox_map.b = msg->axes[9];
+      xbox_map.c = msg->axes[10];
+      xbox_map.d = msg->axes[11];
+      xbox_map.e = msg->axes[4];
+      xbox_map.f = msg->axes[7];
+      xbox_map.g = msg->axes[5];
+      xbox_map.h = msg->axes[6];
+      xbox_map.x1 = msg->axes[3];
+      xbox_map.x2 = msg->axes[0];
+      xbox_map.y1 = msg->axes[2];
+      xbox_map.y2 = msg->axes[1];
+    }
+#endif
+
+    st_interface<float> inference_data;
+    c_interface<float> Robot_inference;
+    Robot_inference.init(inference_data);
+    sovle_st<float> raw_data;
+
+    kp << 700.0, 500.0, 700.0, 700.0, 15.0, 15.0, 700.0, 500.0, 700.0, 700.0,
+        15.0, 15.0, 20.0, 10.0, 10.0, 10.0, 20.0, 10.0, 10.0, 10.0;
+    kd << 10.0, 5.0, 10.0, 10.0, 1.25, 1.25, 10.0, 5.0, 10.0, 10.0, 1.25, 1.25,
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0;
+
+    while (1) {
+      total_time = timer.currentTime() - start_time;
+      start_time = timer.currentTime();
+      // 读取消息队列
+      while (!queueMotorState.empty()) {
+        auto msg = queueMotorState.pop();
+        // set motor buf
+        int id = 0;
+        for (auto &one : msg->status) {
+          id = motor_id[one.name];
+          Q_a(id) = one.pos;
+          Qdot_a(id) = one.speed;
+          Tor_a(id) = one.current * ct_scale(id);
+        }
+      }
+
+      for (int i = 0; i < motor_num; i++) {
+        if (fabs(Q_a(i) - Q_a_last(i)) > pi) {
+          std::cout << i << "   joint error" << std::endl;
+          std::cout << "Q_a_last: " << Q_a_last(i) << std::endl;
+          std::cout << "Q_a: " << Q_a(i) << " Qdot_a: " << Qdot_a(i)
+                    << " Tor_a: " << Tor_a(i) << std::endl;
+          Q_a(i) = Q_a_last(i);
+          Qdot_a(i) = Qdot_a_last(i);
+          Tor_a(i) = Tor_a_last(i);
+        }
+      }
+      Q_a_last = Q_a;
+      Qdot_a_last = Qdot_a;
+      Tor_a_last = Tor_a;
+
+      // real feedback
+      for (int i = 0; i < motor_num; i++) {
+        q_a(i) = (Q_a(i) - zero_pos(i)) * motor_dir(i) + zero_offset(i);
+        q_a(i) += zero_cnt(i) * 2.0 * pi; // 处理角度周期性问题
+        qdot_a(i) = Qdot_a(i) * motor_dir(i);
+        tor_a(i) = Tor_a(i) * motor_dir(i);
+      }
+
+#ifdef USE_ROS_JOY
+      joystick_humanoid.xbox_flag_update(xbox_map);
+#endif
+      xbox_flag flag_ = joystick_humanoid.get_xbox_flag();
+
+      if (xbox_map.f == -1.0) { // 往下拨杆，行走模式
+        while (!queueCmdVel.empty()) {
+          auto msg = queueCmdVel.pop();
+          x_speed_command = msg->linear.x;
+          y_speed_command = msg->linear.y;
+          yaw_speed_command = msg->angular.z;
+        }
+        flag_.x_speed_command = fmin(fmax(x_speed_command, -0.5), 1.0);
+        flag_.y_speed_command = fmin(fmax(y_speed_command, -0.1), 0.1);
+        flag_.yaw_speed_command = fmin(fmax(yaw_speed_command, -0.2), 0.2);
+      }
+
+      if (flag_.is_disable) {
+        kp.setZero();
+        kd.setZero();
+        q_d.setZero();
+        qdot_d.setZero();
+        tor_d.setZero();
+      } else if (flag_.fsm_state_command == "gotoZero") {
+        for (size_t i = 0; i < motor_num; i++) {
+          q_d(i) =
+              static_cast<double>(inference_data.config.default_position[i]);
+          qdot_d(i) = 0.0;
+          tor_d(i) = 0.0; // 这里是前馈扭矩，不是目标扭矩。
+        }
+      } else if (flag_.fsm_state_command == "gotoStop") {
+        kp.setZero();
+        kd.setZero();
+        q_d.setZero();
+        qdot_d.setZero();
+        tor_d.setZero();
+      } else if (flag_.fsm_state_command == "gotoMLP") { // 这里变成正弦测试
+
+        // joint data
+        for (int i = 0; i < motor_num; i++) {
+          raw_data.motor_current_position[i] = static_cast<float>(q_a(i));
+          raw_data.motor_current_velocity[i] = static_cast<float>(qdot_a(i));
+        }
+
+        Robot_inference.Getdata(raw_data, inference_data);
+
+        // 单关节正弦测试
+        const size_t test_idx = 0;   // size_t到底跟int有什么区别
+        const float amplidute = 0.1; // 0.1 rad，6度左右
+        const float frequency = 1.0;
+        float current_time = count * dt;  //? 这对吗？
+
+        static float initial_pos = raw_data.joint_current_position[test_idx];
+        float target_pos =
+            initial_pos + amplidute * std::sin(2 * M_PI / current_time);
+
+        for (size_t i = 0; i < motor_num; i++) {
+          // 测试关节正弦运动，其他关节保持零位静止
+          if (i == test_idx) {
+            q_d(i) = static_cast<double>(target_pos);
+          } else {
+            q_d(i) =
+                static_cast<double>(inference_data.config.default_position[i]);
+            qdot_d(i) = 0.0;
+            tor_d(i) = 0.0; // 这里是前馈扭矩，不是目标扭矩。
+          }
+        }
+      }
+      timer2 = timer.currentTime() - start_time - timer1;
+
+      for (int i = 0; i < motor_num; i++) {
+        Q_d(i) =
+            (q_d(i) - zero_offset(i) - zero_cnt(i) * 2.0 * pi) * motor_dir(i) +
+            zero_pos(i);
+        Qdot_d(i) = qdot_d(i) * motor_dir(i);
+        Tor_d(i) = tor_d(i) * motor_dir(i);
+      }
+
+      // Send Command motorctrl mode
+      bodyctrl_msgs::CmdMotorCtrl msg;
+
+      for (int i = 0; i < motor_num; i++) {
+        // for (int i=0; i< 12; i++){
+        bodyctrl_msgs::MotorCtrl cmd;
+        cmd.name = motor_name[i];
+        cmd.kp = kp(i);
+        cmd.kd = kd(i);
+        cmd.pos = Q_d(i);
+        cmd.spd = Qdot_d(i);
+        cmd.tor = Tor_d(i);
+        msg.header.stamp = ros::Time::now();
+        msg.cmds.push_back(cmd);
+      }
+
+      pubSetMotorCmd.publish(msg);
+      // rate.sleep();
+
+      timer3 = timer.currentTime() - start_time - timer1 - timer2;
+
+      count++;
     }
   }
 

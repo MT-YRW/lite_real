@@ -4,4 +4,9 @@
       A node to add a value and republish.
     </description>
   </class>
+  <class name="rl_control_new/RLControlTest" type="rl_control_test::test" base_class_type="nodelet::Nodelet">
+    <description> 
+      A node to test simple joint.
+    </description>
+  </class>
 </library>
